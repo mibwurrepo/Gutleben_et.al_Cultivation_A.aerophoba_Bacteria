@@ -1,0 +1,1688 @@
+---
+title: "Cultivation of Bacteria from Aplysina aerophoba"
+subtitle: 'Effects of oxygen and nutrient gradients'
+author: "Johanna Gutleben"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=10, fig.height=7, echo = TRUE, warning=FALSE, message=FALSE)
+
+```
+
+
+# Summary  
+Sponge-associated bacteria possess biotechnologically interesting properties, however, these microbes have majorly evaded cultivation despite numerous efforts. Thus, ‘omics’-based methods have provided extensive information on the ecology and functional potential of sponge symbionts, which is waiting to be integrated into the design of innovative cultivation conditions. To cultivate bacteria derived from the marine sponge Aplysina aerophoba, nine novel media formulations were created based on the predicted genomic potential of the prevalent sponge symbiont lineage Poribacteria. Furthermore, in an attempt to maintain microbial metabolic interactions in vitro, a liquid-solid approach as well as a Winogradsky-column approach were applied. The vast majority of microorganisms appear viable after cryopreservation as determined by selective propidium monoazide DNA modification of compromised cells, however, only 2% of the initial microbial diversity could be recovered through cultivation. In total, 256 OTUs encompassing seven microbial phyla were cultivated. The addition of the antibiotic aeroplysinin-1 negatively impacted the number and morphology of colonies, and medium dilution, rather than carbon source, influenced the diversity of the cultivated community. Furthermore, the Winogradsky-column approach reproducibly enriched distinct communities at different depths, amongst which were numerous Clostridia and OTUs that could not be assigned to a known phylum. While some bacterial taxa such as Pseudovibrio and Ruegeria were recovered from nearly all applied cultivation conditions, other taxa, such as Bacteroidetes were specific to certain medium types. We conclude that the reason dominant sponge-associated microbial taxa remain uncultured is our inability to recreate cultivation conditions that resemble the sponge ecosystem. Nonetheless, alternative cultivation approaches could enrich for previously uncultivated microbes.
+
+
+
+ ![](Workflow_graph_2.png)
+ 
+This analysis relies heavily on the [microbiome package](https://github.com/microsud/microbiome), the [microbiome utilities package](https://github.com/microsud/microbiomeutilities) and the [phyloseq package](https://joey711.github.io/phyloseq/).
+
+
+Since this is a Rproject, the directory will be automatically set. Confirm using getwd().   
+
+
+# The structure of the Project
+
+AplysinaCultivation6_Final_Analysis_1.Rmd the markdown file for this analysis
+
+1. Data: Contains all input files  
+  all_otus.tre                        -Phylogenetic tree, derived from NG-Tax
+  Aplysina_cultivation.biom           -OTU count table with taxonomic assignments, derived from NG-Tax
+  Map_file_Aplysina_cultivation.txt   -Metadata on all samples included in this analysis
+  
+2. fasta: contains fasta file of OTUs  
+  all_otus.fasta                      -OTU sequences, 100bp length.
+  
+3. Figures: all figures of this analysis
+  Figures_final_edits: final version of the figures. Graphics were edited using Adobe Acrobat and Photoshop.
+
+4. Tables: all exported tables
+
+6. PhyloseqOPbjects: the subsetted/edited phyloseq objects that were produced in this analysis
+
+5. Supplementary: Additional graphs
+
+
+
+### Loading the required packages
+
+
+```{r load-libraries, warning = FALSE, message = FALSE}
+
+library(reshape2)
+library(phyloseq)
+library(ggplot2)
+library(ape)
+library(Biostrings)
+library(RColorBrewer)
+library(scales)
+library(data.table)
+library(microbiome)
+library(dplyr)
+library(DT) #for interactive tables
+library(ggpubr)
+library(vegan)
+library(picante)
+
+# set theme for plotting
+mytheme <- theme_bw() + theme(panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), panel.border = element_rect(colour = "black", fill=NA), axis.text = element_text(colour = "black"), strip.background = element_rect(colour = "black", fill = "white"))
+
+```
+
+# Preprocessing and Quality Control
+
+### Compile Phyloseq object
+
+The biom file and the tree file were downloaded from NG-Tax: 
+
+Ramiro Garcia, J., Hermes, G., & Smidt, H. (2016). NG-Tax NG-Tax, a highly accurate and validated pipeline for analysis of 16S rRNA amplicons from complex biomes. Submitted, (1), 1–18. [link](http://doi.org/10.12688/f1000research.9227.1)
+
+[Phyloseq](https://joey711.github.io/phyloseq/)
+A phyloseq object stores all related phylogenetic sequencing data (mapping file, tree file and biom table) as single experiment-level object, making it easier to share data and reproduce analyses.
+
+WATCH OUT the file extension for the tree file has to be .tre and NOT .tree 
+
+
+```{r make-phyloseq}
+
+#import the phyloseq object
+bio <-import_biom("./Data/Aplysina_cultivation.biom")
+
+
+#import the metadata file aka mapping file
+meta_table <-read.delim("./Data/Map_file_Aplysina_cultivation.txt",row.names=1, sep = "\t")
+
+#make metadata file compatible with phyloseq
+sampleData=sample_data(meta_table)
+
+#import tree
+OTU_tree <- read.tree("./Data/all_otus.tre")
+
+#merge files into phyloseq object
+ps1 <-merge_phyloseq(bio,sampleData,OTU_tree)
+
+#rename the taxonomic rank information
+colnames(tax_table(ps1)) <- c("Domain", "Phylum", "Class", "Order", "Family", "Genus")
+
+# sanity check
+print(ps1)
+
+```
+
+Refining the phyloseq object by filtering out Chloroplasts, and renaming OTUs IDs.
+
+```{r, filtering-chlorplast-from-fasta-file}
+
+#Exclude Chloroplasts from the rest of the dataset.
+ps1a <- subset_taxa(ps1,Class!="c__Chloroplast")
+
+# rename OTU IDs. remove the long part 243143 because it's the same for every OTU, and add OTU-
+otus <- as.vector(taxa_names(ps1a))
+otus2 <- substring(otus, 7, nchar(otus))
+
+# rename OTU0 to OTU621 
+otus21 <- gsub("\\<0\\>","621",otus2)
+
+# paste "OTU-" in front of every OTU number
+otus3 <- paste0("OTU-", otus21)
+
+# make list of new OTU names the taxa names
+taxa_names(ps1a) <- otus3
+
+# name it back ps1
+ps1 <- ps1a
+
+```
+
+Get an overview of the number of sequencing reads per sample.
+Sorts the sample sums from lowest to highest. 
+```{r}
+sort(sample_sums(ps1)) 
+sum(sample_sums(ps1))
+```
+
+Clean the taxonomy table and save the resulting phyloseq object:
+
+```{r cleaning-up-the-taxonomy-table}
+tax_table(ps1)[tax_table(ps1)[,"Domain"]== "NA", "Domain" ] <- "Unidentified_Domain"
+tax_table(ps1)[tax_table(ps1)[,"Phylum"]== "p__", "Phylum" ] <- "Unidentified_Phylum"
+tax_table(ps1)[tax_table(ps1)[,"Class"]== "c__", "Class" ] <- "Unidentified_Class"
+tax_table(ps1)[tax_table(ps1)[,"Order"]== "o__", "Order" ] <- "Unidentified_Order"
+tax_table(ps1)[tax_table(ps1)[,"Family"]== "f__", "Family" ] <- "Unidentified_Family"
+tax_table(ps1)[tax_table(ps1)[,"Genus"]== "g__", "Genus" ] <- "Unidentified_Genus"
+
+## remove all the "p__" from the taxonomy
+tax_table(ps1)[,colnames(tax_table(ps1))] <- gsub(tax_table(ps1)[,colnames(tax_table(ps1))],pattern="[a-z]__",replacement="")
+
+# fill empty Family column with "Unidentified_Family"
+tax_table(ps1)[tax_table(ps1)[,"Family"]== "", "Family" ] <- "Unidentified_Family"
+tax_table(ps1)[tax_table(ps1)[,"Order"]== "<empty>", "Order" ] <- "Unidentified_Order"
+tax_table(ps1)[tax_table(ps1)[,"Family"]== "<empty>", "Family" ] <- "Unidentified_Family"
+tax_table(ps1)[tax_table(ps1)[,"Genus"]== "<empty>", "Genus" ] <- "Unidentified_Genus"
+
+
+## replace all the "unknown" with "unidentified" from the taxonomy
+tax_table(ps1)[,colnames(tax_table(ps1))] <- gsub(tax_table(ps1)[,colnames(tax_table(ps1))],pattern="Unknown_",replacement="Unidentified_")
+
+# capitalize "uncultured"
+tax_table(ps1)[,colnames(tax_table(ps1))] <- gsub(tax_table(ps1)[,colnames(tax_table(ps1))],pattern="uncultured",replacement="Uncultured")
+
+# save the phyloseq object:
+# ps1: clean phyloseq object.
+saveRDS(ps1, "./PhyloseqObjects/ps1.RDS")
+
+```
+
+Visualizing the distribution of reads over the samples.
+
+```{r Preprocssing-and-QC-1}
+
+ps1_df= data.table(as(sample_data(ps1), "data.frame"), Reads_per_sample = sample_sums(ps1), keep.rownames = TRUE)
+ps1_df_plot = ggplot(ps1_df, aes(Reads_per_sample)) + geom_histogram() + ggtitle("Distribution of reads per sample") + ylab("Sample counts") + mytheme
+
+print(ps1_df_plot) #normal plot
+
+# and save the graph:
+ggsave("./Figures/Preprocessing_QC/1_Distribution_of_reads_per_sample.pdf", height = 6, width = 8)
+
+```
+
+Vizualize the distribution of the OTUs in the data set. 
+
+We make a data table with information on the OTUs  
+```{r Preprocssing-and-QC-2, fig.show='hold', fig.align='center'}
+
+# data table with OTU information: OTUabundance = number of reads for this OTU
+ps1.dt.taxa = data.frame(tax_table(ps1), Reads_per_OTU = taxa_sums(ps1), OTU = taxa_names(ps1))
+
+# plot histogram of counts
+ps1.dt.tax.plot <- ggplot(ps1.dt.taxa, aes(Reads_per_OTU)) + geom_histogram() + ggtitle("Histogram of OTU counts") + mytheme
+print(ps1.dt.tax.plot)
+
+plot.zoom <- ggplot(ps1.dt.taxa, aes(Reads_per_OTU)) + geom_histogram(breaks=seq(0, 20, by =1)) + ggtitle("Histogram of OTU counts zoom") + mytheme
+print(plot.zoom)
+
+plot <- ggarrange(ps1.dt.tax.plot, plot.zoom, ncol=2, nrow=1, align = "h")
+
+# and save the graph:
+ggsave("./Figures/Preprocessing_QC/2_Histogram_of_OTU_Counts.pdf", height = 6, width = 8)
+
+```
+
+Calculate total number of reads in the dataset
+
+```{r Preprocssing-and-QC-3}
+reads_per_OTU <- sort(taxa_sums(ps1))
+print(sum(reads_per_OTU))
+```
+
+print how many OTUs consist of less than 50 reads, and how many reads do they contain, and what percent of the data is this?
+
+```{r Preprocssing-and-QC-4}
+print(length(reads_per_OTU[reads_per_OTU < 50])) # number of OTUs less than specified reads
+print(sum(reads_per_OTU[reads_per_OTU < 50]))    # number of reads of those OTUs
+
+```
+To put this into context; out of the 607 OTUs, a 108 OTUs contain less than 50 reads, which is:
+```{r Preprocssing-and-QC-5}
+print((108/1966)*100)   # divide number of OTUs less than specified reads by total number of OTUs
+```
+5.493388% of the OTUs contain less than 50 reads. 
+
+Check for singletons and doubletons and remove singletons.
+
+Save the resulting phyloseq object.
+ 
+```{r Preprocssing-and-QC-6}
+
+zero <- ps1.dt.taxa[(ps1.dt.taxa$OTUabundance <= 0), ] # 20 OTUs with 0 reads
+#check for doubletons: no doubletons
+three <- ps1.dt.taxa[(ps1.dt.taxa$OTUabundance == 3), ] # 8 OTUs with 3 reads
+
+# in ps1 there are 20 OTUs with 0 reads!
+
+# remove singletons:
+ps2 <- prune_taxa(taxa_sums(ps1) > 0, ps1)
+
+any(taxa_sums(ps2) == 1) # 0 singletons
+any(taxa_sums(ps2) == 2) # 0 doubletons
+
+# save the phyloseq object:
+# ps2: clean phyloseq object with singletons removed.
+saveRDS(ps2, "./PhyloseqObjects/ps2.RDS")
+
+```
+
+# Final phyloseq Object:
+ps2: Phyloseq Object: It contains OTU read counts, taxonomic information and a phylogenetic tree from 74 samples.
+The ps2 phyloseq object is the starting point for all analyses below. 
+
+```{r}
+ps2
+```
+
+
+
+# Viability of microorganisms after cryopreservation
+Samples were treated with a propidium monoazide dye (PMA) that inhibits PCR amplification of membrane-impaired, dead cells. Only viable cells with intact membranes are amenable to PCR amplification and sequencing. 
+
+4 samples were used for this test, two original cryostock samples, and the respective samples treated PMA, which represent the viable microorganisms of the cryostock samples. 
+
+```{r}
+
+# subset the phyloseq object to only PMA samples
+ps2.PMA1 <- subset_samples(ps2, Source == "Sponges") 
+ps2.PMA2 <- subset_samples(ps2.PMA1, ProjectName == "Sponges_PMA")
+
+# remove OTUs that are not in these samples
+ps2.PMA <- prune_taxa(taxa_sums(ps2.PMA2) > 0, ps2.PMA2)
+sample_data(ps2.PMA)
+
+# save a phyloseq object 
+saveRDS(ps2.PMA, "./PhyloseqObjects/ps2.PMA.RDS")
+
+``` 
+
+## Diversity estimates of PMA samples
+```{r other-richness-estimates-for-PMA-samples, tidy=TRUE}
+
+#plot the diversity using different metrics
+p <- plot_richness(ps2.PMA, "Method", measures = c("Observed", "Chao1", "Shannon", "Simpson", "InvSimpson", "Fisher"))
+
+p <- p + geom_boxplot(aes())  + theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme(strip.background = element_rect(fill="white"))
+print(p)
+
+ggsave("./Supplementary/3_Alpha_diversity_PMA.pdf", p, width=6, height= 4)
+```
+
+
+### Richness of PMA samples with microbiome package
+
+```{r richness-of-PMA-samples, tidy=TRUE}
+
+# We can check whether there  are any significant differences in alpha diversity between the sample groups we are interested in.
+ps2.PMA.adiv <- estimate_richness(ps2.PMA, measures = c("Chao1", "Shannon", "Observed", "InvSimpson"))
+
+# make dataframe 
+ps2.metadata <- as(sample_data(ps2.PMA), "data.frame")
+
+#We add the columns with the alpha-div indices from ps3.adiv to ps3.adiv.metadata where all info including metadata is now available.
+ps2.metadata$Observed <- ps2.PMA.adiv$Observed 
+ps2.metadata$Shannon <- ps2.PMA.adiv$Shannon
+ps2.metadata$InvSimpson <- ps2.PMA.adiv$InvSimpson
+
+# select columns and write into table
+ps2.meta <- select(ps2.metadata, Method, SampleID.1, Observed, Shannon, InvSimpson)
+write.csv(ps2.meta, "./Tables/Alpha_Diversity_Cryostock_PMA.csv")
+
+# Compare difference between PMA and cryostock samples using richness
+kruskal.obs <- kruskal.test(ps2.metadata$Observed ~ ps2.metadata$Method)
+print(kruskal.obs) # there is no significant difference in richness
+
+# we can also compare two groups with adjustment for multiple testing
+pairwise.wilcox.test(ps2.metadata$Observed, ps2.metadata$Method, p.adj = "BH") # neither with the wilcoxon test
+
+```
+
+
+### Phylogenetic diversity of PMA samples
+
+```{r prepare-for-plot-phylogenetic-diversity-onlyPMA, warning=FALSE, message=FALSE, tidy=TRUE}
+
+#create a datatable from the otu_table of phyloseq
+otu_table_ps2.PMA <- as.data.frame(ps2.PMA@otu_table)
+
+# export tree from ps2 phyloseq object:
+OTU_tree.PMA <- phy_tree(ps2.PMA)
+
+# calculate phylogenetic diversity
+df.pd.PMA <- pd(t(otu_table_ps2.PMA), OTU_tree.PMA,include.root=F) # t(ou_table) transposes the table for use in picante
+
+# the phylogenetic diversity dataframe: df.pd
+# subset the dataframe to only PMA samples
+myvars <- c("A0ip", "A0iip", "A0i", "A0ii")
+PMA.pd <- df.pd.PMA[myvars,]
+
+# get the metadata (sample data) from phyloseq into seprate object as data.frame
+metadata_table_ps2.PMA  <- as.data.frame(ps2.PMA@sam_data)
+
+# add the PD values into the metadata
+metadata_table_ps2.PMA$Phylogenetic_diversity <- PMA.pd$PD 
+
+# Visualize p values: Specify the comparisons you want (only 2 possible within the vectors)
+my_comparisonsPMA <- list( c("Cryostock", "PMA"))
+
+#plot the phylogenetic diversity 
+plot.pd.PMA <- ggplot(metadata_table_ps2.PMA, aes(Method, Phylogenetic_diversity)) +  geom_boxplot() + geom_point() + theme(axis.text.x = element_text(size=14, angle = 90)) + theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + # Add pairwise comparisons p-value
+  stat_compare_means(paired = TRUE, label.y = 11.5, label.x = 1) +  ylab("Faith's Phylogenetic Diversity")
+
+print(plot.pd.PMA)
+ggsave("./Supplementary/4_PD_PMA.pdf", plot.pd.PMA, height=5, width=3)
+
+```
+
+
+## Analyzing differentially abundant OTUs in PMA vs untreated using DESeq2
+
+DESeq2: Estimate variance-mean dependence in count data from high-throughput sequencing assays and test for differential expression based on a model using the negative binomial distribution.
+
+Love, M. I., Anders, S., & Huber, W. (2014). [Differential analysis of count data - the DESeq2 package. Genome Biology (Vol. 15).](http://doi.org/110.1186/s13059-014-0550-8)
+
+
+```{r, deseq2}
+
+#the phyloseq object containing only PMA samples: ps2.PMA2 
+
+# make sure the reference for DESeq2 is the first level in the data. in this case: Cryostock
+levels(sample_data(ps2.PMA)$Method) 
+
+# code from the microbiome package: https://microbiome.github.io/microbiome/deseq2.html
+library(DESeq2)
+
+
+# Running the DESeq2 analysis
+ds2 <- phyloseq_to_deseq2(ps2.PMA, ~ Method)
+dds <- DESeq(ds2)
+res <- results(dds)
+df <- as.data.frame(res)
+df$taxon <- rownames(df)
+df <- df %>% arrange(log2FoldChange, padj)
+
+rownames(df) <- df$taxon
+df <- cbind(as(df, "data.frame"), as(tax_table(ps2.PMA)[rownames(df), ], "matrix"))
+
+# subset results table to the taxa with significant changes
+alpha = 0.01 # define cutoff for padj
+sigtab = res[which(res$padj < alpha), ]
+
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(ps2.PMA)[rownames(sigtab), ], "matrix"))
+
+```
+
+plot differentially abundant taxa that result from DESeq analysis.
+
+```{r}
+
+# subset dataframe of DeSeq results to only relevant info
+data <- sigtab[, c("log2FoldChange", "Phylum", "Class")]
+
+# change to character class
+data[] <- lapply(data, as.character)
+# replace
+data[data=="Proteobacteria"]<-"Alphaproteobacteria"
+
+# combine Class and OTUID
+data$Phyl_OTU <- paste(data$Phylum,rownames(data))
+
+# sort by Phyl_OTU
+data <- data[order(data$Phyl_OTU),]
+
+index <- with(data, order(data$Phyl_OTU))
+data[index, ]
+
+# change order of dataframe
+data <- data[seq(dim(data)[1],1),]
+data <- data[order(data$Phyl_OTU),]
+
+# change class to numeric
+data$log2FoldChange <- as.numeric(as.character(data$log2FoldChange))
+
+# add variable for positive or negative value
+data[["sign"]] = ifelse(data[["log2FoldChange"]] >= 0, "positive", "negative")
+
+# defining colors
+colourCount = length(unique(data$Phylum))  #define number of variable colors based on number of Phylum (change the level accordingly to phylum/class/order)
+getPalette = colorRampPalette(brewer.pal(12, "Paired"))  # change the palette as well as the number of colors will change according to palette.
+
+# reverse data for plotting
+d <- rev(c(data$Phyl_OTU))
+
+# Plot differentially abundant taxa
+p <- ggplot(data, aes(x = Phyl_OTU, y = log2FoldChange)) +
+    geom_bar(aes(fill = sign), stat = "identity", position="identity") +  # color by class
+    coord_flip() +  # horizontal bars
+     theme_bw() + theme(axis.text.y = element_blank(), axis.ticks = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+p_log <- p + scale_fill_manual(values = getPalette(colourCount)) + geom_hline(aes(yintercept = 0)) + xlab("") + ylab("log2 Fold Change") + scale_x_discrete(limits=d)
+
+ggsave("./Figures/Figure_2_Differential_abundance_PMA.pdf", p_log, height = 4, width = 5)
+p_log
+
+```
+
+plot read count of significantly differentially abundant taxa
+
+```{r}
+
+# prune phyloseq object to the taxa from the DESeq analysis
+my_subset <- subset(otu_table(ps2.PMA), rownames(otu_table(ps2.PMA)) %in% rownames(sigtab))
+ps2.PMA3 <- merge_phyloseq(my_subset, tax_table(ps2.PMA), sample_data(ps2.PMA), phy_tree(ps2.PMA))
+
+# to plot relative abundance changes:
+#transform to relative abundance
+# ps2.PMA3 <- microbiome::transform(ps2.PMA3, "compositional")
+
+# add a column with replicate ID to the sample data
+x <- data.frame(sample_data(ps2.PMA3))
+x$Repl <- c(1,2,1,2)
+sample_data(ps2.PMA3) <- sample_data(x)
+
+# calculate mean and stdev for the samples
+otus <- data.frame(otu_table(ps2.PMA3))
+otus$PMAmean <- apply(otus[,1:2], 1, mean)
+otus$Crymean <- apply(otus[,3:4], 1, mean)
+otus$PMAstdev <- apply(otus[,1:2], 1, sd)
+otus$Crystdev <- apply(otus[,3:4], 1, sd)
+otus<- otus[, 5:8]
+
+# extract taxonomy table
+tax <- data.frame(tax_table(ps2.PMA3))
+
+# combine the means in a dataframe
+total <- cbind(otus,tax)
+
+# combine Phylum and OTUID
+total$Phyl_OTU <- paste(total$Phylum,rownames(total))
+
+#subset dataframe to what's necessary
+tota <- total[,1:4]
+tota$Phyl_OTU <- total$Phyl_OTU
+colnames(tota) <- c("PMA-mean", "Cry-mean", "PMA-stdev", "Cry-stdev", "Phyl_OTU")
+
+
+# reorder by column name
+tota <- tota[c("Cry-mean", "PMA-mean", "Cry-stdev", "PMA-stdev", "Phyl_OTU")]
+
+library(tidyr)
+tota_clean <- tota %>%
+    gather(mean, value, -Phyl_OTU) %>%
+    separate(mean, c("measure_letter", "temp_var"))%>%
+    spread(temp_var, value)
+
+# change order of factors in the Cry-PMA column so it gets plotted in the right order
+tota_clean$measure_letter <- as.factor(tota_clean$measure_letter)
+tota_clean$measure_letter <- factor(tota_clean$measure_letter, levels=c("PMA","Cry"))
+
+# make vector for order of x axis: goes with + scale_x_discrete 
+d <- rev(c(data$Phyl_OTU))
+
+# plot
+p_abs <- ggplot(tota_clean, aes(x=Phyl_OTU, y=mean, fill=measure_letter)) + geom_bar(stat="identity", position=position_dodge()) +  geom_errorbar(aes(ymin=mean-stdev, ymax=mean+stdev), width=.2,
+                 position=position_dodge(.9)) + mytheme + coord_flip() + scale_x_discrete(limits=d) +
+guides(fill = guide_legend(reverse = TRUE)) 
+
+p_abs <- p_abs + scale_fill_discrete(name = "Sample type", breaks=c("PMA", "Cry"), labels=c("PMA Treatment", "Cryopreserved Samples")) + theme(legend.position = c(0.8, 0.9))
+
+
+ggsave("./Figures/Abundance_DESeq2_OTUs.pdf", height = 4, width = 5)
+p_abs
+
+``` 
+
+Arrange the figures in one plot.
+
+```{r}
+figure5 <- ggarrange(p_abs  + ggtitle("A) Changes in read counts") + xlab(NULL) + ylab("Number of reads"), p_log + theme(legend.position="none")  + ggtitle("B) DESeq2 log2 fold change"), ncol = 2, nrow = 1, align = "h", widths = c(2, 1) )
+
+ggsave("./Figures/Figure_2_Abundance_log_DESeq2_OTUs.pdf", height = 5, width = 10)
+
+figure5 
+
+``` 
+
+Calculate percent abundance of differentially abundant taxa of the total.
+
+```{r}
+
+#transform to relative abundance
+ps2.PMA5 <- microbiome::transform(ps2.PMA, "compositional")
+
+
+# prune phyloseq object to the taxa from the DESeq analysis
+my_subset <- subset(otu_table(ps2.PMA5), rownames(otu_table(ps2.PMA5)) %in% rownames(sigtab))
+ps2.PMA6 <- merge_phyloseq(my_subset, tax_table(ps2.PMA5), sample_data(ps2.PMA5), phy_tree(ps2.PMA5))
+
+x <- as.data.frame(sample_sums(ps2.PMA6))
+
+# calculate percent abundance of the total community of DESeq taxa
+Cr <- ((0.1220741+0.12503898)/2)*100
+P <- ((0.04732581+ 0.04366107)/2)*100
+
+
+# subset the phyloseq object to count taxa
+
+ps2.PMA.Cry <- subset_samples(ps2.PMA2, Method == "Cryostock")
+ps2.PMA.Cry <- prune_taxa(taxa_sums(ps2.PMA.Cry) > 0, ps2.PMA.Cry)
+# 109 taxa
+
+ps2.PMA.PMA <- subset_samples(ps2.PMA2, Method == "PMA")
+ps2.PMA.PMA <- prune_taxa(taxa_sums(ps2.PMA.PMA) > 0, ps2.PMA.PMA)
+# 104 taxa
+
+# export the tables to use in a venn-diagram tool:
+write.table(c(row.names((as.data.frame(tax_table(ps2.PMA.PMA))))), "PMA.txt", row.names = F, quote=F)
+write.table(c(row.names((as.data.frame(tax_table(ps2.PMA.Cry))))), "Cry.txt", row.names = F, quote=F)
+
+# to check out which OTUs are the same, and which are different, in the treatments:
+# paste the OTU names into http://bioinfogp.cnb.csic.es/tools/venny/index.html
+
+# 4 elements included exclusively in "PMA":
+PMAex <- c("OTU-545", "OTU-540", "OTU-538", "OTU-539")
+
+# 9 elements included exclusively in "Cry":
+Cryex <- c("OTU-568", "OTU-569", "OTU-565", "OTU-567", "OTU-570", "OTU-564", "OTU-566", "OTU-571", "OTU-572")
+
+ta <- data.frame(tax_table(ps2.PMA))
+ta$OTU <- rownames(ta)
+ot <- data.frame(otu_table(ps2.PMA5))
+ta <- cbind(ta, ot)
+
+# which taxa occur only in samples of one treatment? What is their taxonomy?
+
+# check taxonomy of PMA exclusive
+taPMA <- ta[ta$OTU %in% PMAex, ]
+
+# check taxonomy of cry exclusive
+taCry <- ta[ta$OTU %in% Cryex, ]
+
+# check which OTUs are only in Cry samples that show up significant in DESeq analysis:
+taCry1 <- taCry[taCry$OTU %in% rownames(sigtab), ]
+# 8 OTUs
+
+datatable(taCry1)
+
+``` 
+
+# Cultivation overview  
+
+Aplysina aerophoba-derived bacteria were grown in three different cultivation experiments: (a) a variety of “Plates” with media tailored towards the cultivation of Poribacteria, (b) a “Liquid-Solid” experiment where bacteria were incubated in liquid medium and subsequently transferred to plates that were covered with the same liquid growth medium and (c) in Winogradsky columns, here referred to as “MiniColumns”.  
+Alongside the cultivation-experiments-derived samples, also original cryopreserved material as well as seawater from the sampling site was sequenced and analyzed.   
+
+## Alpha diversity calculations  
+
+Calculating Faith's phylogenetic diversity using the pd function of the [picante](https://cran.r-project.org/web/packages/picante/picante.pdf) package.   
+
+```{r Alpha-diversity-calculations}
+#create a datatable from the otu_table of phyloseq
+otu_table_ps2 <- as.data.frame(ps2@otu_table)
+
+# export tree from ps2 phyloseq object:
+OTU_tree <- phy_tree(ps2)
+
+# calculate phylogenetic diversity
+df.pd <- pd(t(otu_table_ps2), OTU_tree,include.root=F) # t(ou_table) transposes the table for use in picante
+
+# calculate other alpha diversity metrics
+tab3 <- global(ps2, index = "all")
+write.csv(tab3, file = "./Tables/diversity_all_samples.csv")
+
+```
+
+To plot PD we get the metadata file from phyloseq object.  
+
+We will add the results of PD to this file and then plot phylogenetic diversity.   
+
+```{r plot-phylogenetic-diversity-1, warning=FALSE, message=FALSE, tidy=TRUE}
+
+# get the metadata (sample data) from phyloseq into seprate object as data.frame
+metadata_table_ps2  <- meta(ps2)
+# add the PD values into the metadata
+metadata_table_ps2$Phylogenetic_diversity <- df.pd$PD 
+
+# change the order of the metadata table
+metadata_table_ps2$Origin <- factor(metadata_table_ps2$Origin, levels = c("Seawater","Sponges", "Plates", "MiniColumns", "Liquid_Culture", "Liquid_Solid"))
+
+# Visualize p values: Specify the comparisons you want (only 2 possible within the vectors)
+my_comparisons2 <- list( c("Sponges", "Seawater"), c("Sponges", "MiniColumns"))
+
+# plot phylogenetic diversity of all samples
+plot.pd <- ggplot(metadata_table_ps2, aes(Origin, Phylogenetic_diversity)) + geom_boxplot() +  geom_jitter(aes(color = Origin), width=0.2, size = 2.5) + scale_color_manual(values=c("blue","#f9ee00","orange", "red", "grey")) + theme(axis.text.x = element_text(size=14, angle = 90)) + theme_bw()  +  # add the stars of the p-values (wilcoxon rank sum test)
+  stat_compare_means(comparisons = my_comparisons2, label.y = c(12.5, 13), label = "p.signif", hide.ns = FALSE) 
+
+
+plot.pd <- plot.pd + xlab("") + ylab("Faith's Phylogenetic Diversity") + theme(panel.grid.minor=element_blank(), panel.grid.major=element_blank())
+
+ggsave("./Figures/Alpha_Diversity/1_Phylogenetic_Diversity.pdf", height=6, width=8)
+print(plot.pd)
+
+```
+
+Addition: Calculate PD for sample sets pooled by Origin to get a complete phylogenetic diversity of the different cultivation experiments and the original samples:  
+
+```{r calculate-pd-for-samples-merged-by-Origin}
+
+# merge phyloseq based on "Origin"
+mergedps2 = merge_samples(ps2, "Origin")
+sample_data(mergedps2)
+
+# get the tree out
+mergedtree <- phy_tree(mergedps2)
+
+#create a datatable from the otu_table of phyloseq
+otu_table_mergedps2 <- as.data.frame(mergedps2@otu_table)
+
+# calculate phylogenetic diversity
+merged_df.pd <- pd((otu_table_mergedps2), mergedtree,include.root=F) # in this case no need to transform the otu_table because merge already transforms it.
+
+datatable(merged_df.pd)
+
+write.csv(merged_df.pd, file = "./Tables/PD_merged_samples.csv")
+
+# calculate other alpha diversity metrics
+tab4 <- global(mergedps2, index = "all")
+
+write.csv(tab4, file = "./Tables/diversity_merged_samples.csv")
+
+``` 
+
+
+## Beta diversity  
+
+
+Preproccing for beta diversity calculations.
+Standardize abundances to relative abundance. 
+
+```{r Beta-diversity-1, warning=FALSE, message=FALSE}
+# transform to relative abundance
+ps2.x <- microbiome::transform(ps2, "compositional")
+
+# save the phyloseq object:
+# ps2.x: relative abundance phyloseq object without chloroplasts, and clean taxonomy
+saveRDS(ps2.x, "./PhyloseqObjects/ps2.x.RDS")
+
+```
+
+
+### Weighted UniFrac PCoA
+
+Calculate ordinations for all samples to compare distances.
+
+I tried numerous distance metrics and ordination methods and decided on weighted UniFrac as distance method, and PCoA as ordination method, since in my opinion it reflects the data the best way.  
+
+
+*UniFrac is a recently-defined and popular distance metric to summarize the difference between pairs of ecological communities. All UniFrac variants use a phylogenetic tree of the relationship among taxa as central information to calculating the distance between two samples/communities. An unweighted UniFrac distance matrix only considers the presence/absence of taxa, while weighted UniFrac accounts for the relative abundance of taxa as well as their phylogenetic distance.* 
+
+Lozupone, C., Lladser, M. E., Knights, D., Stombaugh, J., & Knight, R. (2011). [UniFrac: An effective distance metric for microbial community comparison. ISME Journal, 5(2), 169–172.](http://doi.org/10.1038/ismej.2010.133)
+
+
+
+```{r plot-unifrac-weighted2, fig.show='hold', fig.align='center'}
+# set a seed for reproducibility of analysis
+set.seed(25817)
+
+# calculate weighted Unifrac PCoA ordination
+ordu.wt.uni = ordinate(ps2.x, "PCoA", "unifrac", weighted=TRUE)
+
+# plot ordination
+wt.unifrac <- plot_ordination(ps2.x, ordu.wt.uni, color="Origin") + ggtitle("Weighted UniFrac PCoA") + theme_bw() + geom_point(size = 2.5) + scale_color_manual(values=c("grey", "red","orange", "blue", "#f9ee00")) 
+print(wt.unifrac)
+
+wt.unifrac <- wt.unifrac + mytheme
+
+ggsave("./Figures/Beta_Diversity/1_PCoA_weighted_unifrac.pdf", height=6, width=9)
+
+```
+
+Test significance of clustering based on sample Origin.
+
+```{r adonis}
+# adonis
+metadf <- data.frame(sample_data(ps2.x))
+wunifrac_ps2.x <- phyloseq::distance(physeq = ps2.x, method = "wunifrac")
+# Adonis test
+adonis(wunifrac_ps2.x ~ Origin, data = metadf)
+
+# Permutational analysis of multivariate dispersions (PERMDISP) (Anderson, 2006) to test heterogeneity of community structure.
+
+beta <- betadisper(wunifrac_ps2.x, metadf$Origin)
+permutest(beta)
+
+## Plot the groups and distances to centroids on the
+## first two PCoA axes
+plot(beta)
+
+
+## Tukey's Honest Significant Differences
+(beta.HSD <- TukeyHSD(beta))
+plot(beta.HSD)
+
+```
+
+
+This output tells us that our adonis test is significant so we can reject the null hypothesis that all samples are the same.
+-> Origin significantly separates the samples  
+
+Additionally, our betadisper results are  not significant, meaning we can not reject the null hypothesis that our groups have the same dispersions. All groups have same dispersions. This means we can be confident that our adonis result is a real result, and is not due to differences in group dispersions  
+
+if beta disperser is significant, then adonis result could be chance event.  
+
+
+Combine plots on alpha and beta diversity:  
+
+```{r alpha-and-beta-diversity-plot,  fig.width=7, fig.height=4}
+
+# combine figures on alpha and beta diversity 
+figure3 <- ggarrange(plot.pd + font("x.text", size = 9) + rremove("xlab") + ggtitle("A) Phylogenetic Diversity"), wt.unifrac + font("x.text", size = 10) + font("xlab", size=10) + ggtitle("B) Weighted UniFrac PCoA"),
+                    ncol = 2, nrow = 1, align = "hv",
+                    common.legend = TRUE, legend = "right") 
+figure3 
+ggsave("./Figures/Figure_3_PD_PCoA.pdf", height=3.5, width=10)
+
+``` 
+
+Figure 3: Faith’s Phylogenetic Diversity (A) and principle coordinate analysis plot (B) describing the weighted UniFrac distance metric on the microbial diversity of cultivation and environmental samples. Sample origin significantly (adonis, F.Model=85.4, R2= 0.83201, p<0.001) explains the separation.   
+
+
+
+# General overview of Cultivation experiments  
+
+
+subset samples and prune taxa: all cultivation samples
+
+```{r Subset-to-cultivation-samples-only}
+
+# read in phyloseq object
+ps2.x <- readRDS("./PhyloseqObjects/ps2.x.RDS")
+
+# subset the scaled phyloseq object to only cultivation samples
+ps2.Cult <- subset_samples(ps2.x, Source!="Seawater") %>% subset_samples(Source!="Sponges")
+
+# remove OTUs that are not in these samples
+ps2.Cult1 <- prune_taxa(taxa_sums(ps2.Cult) > 0, ps2.Cult)
+
+saveRDS(ps2.Cult1, "./PhyloseqObjects/ps2.Cult1.RDS")
+
+# number of OTUs
+n <- ntaxa(ps2.Cult1)
+
+# number of otus per sample
+otu_table_ps2.Cult1 <- as.matrix(otu_table(ps2.Cult1))
+
+nOTUS <- sort(colSums(otu_table_ps2.Cult1 !=0))
+nOTUS
+
+# mean number of OTUs per sample
+mean <- mean(nOTUS)
+
+``` 
+
+Summarizing the cultivation experiments: how many OTUs are from which Phylum and Class.
+
+```{r summarizing-cultivation-experiment}
+# create a presence-absence dataset
+# divide every value by itself 
+ps2.Cult.preabs <- transform_sample_counts(ps2.Cult1, function(x) x / x )
+preabs <- as.data.frame(otu_table(ps2.Cult.preabs))
+
+#replace NA with 0
+preabs2 <- replace(preabs, is.na(preabs), 0)
+
+# rename phyloseq
+ps2.Cult.preabs2 <- ps2.Cult.preabs
+
+# integrate dataframe into phyloseq 
+OTU = otu_table(as.matrix(preabs2), taxa_are_rows = TRUE)
+
+#merge into phyloseq
+p <- merge_phyloseq(ps2.Cult.preabs2@sam_data,ps2.Cult.preabs2@tax_table,OTU)
+
+#aggregate per Phylum
+mGP = tax_glom(p, "Phylum")
+
+
+# number of cultivated phyla
+# combine taxonomy table and otu table
+o <- cbind(ps2.Cult1@tax_table, ps2.Cult1@otu_table)
+o <- as.data.frame(o)
+
+# count the number of "Phylum entries" 
+r <- plyr::count(o, vars="Phylum")
+row.names(r)
+
+#calculate % of OTUs per Phylum and Class
+r$Phylum_percent <- (r$freq / sum(r$freq))*100
+write.table(r, "./Tables/Frequency_cultivated_OTUs_Phylum.csv", sep=",", quote = F,row.names = F)
+
+
+s <- plyr::count(o, vars="Class")
+s$Class_percent <- (s$freq / sum(s$freq))*100
+
+write.table(s, "./Tables/Frequency_cultivated_OTUs_Class.csv", sep=",", quote = F,row.names = F)
+datatable(s)
+
+```
+
+
+## Venn diagram 
+
+Venn diagram displaying the shared and unique OTUs that are found in different cultivation setups and the original sponge and seawater samples. To date there are no real great Venn diagram tools available for R, thus, i export the data and vizualize Venn diagrams online.  
+
+```{r}
+
+# combine the otu table with the taxonomy table
+otu_tax <- cbind(otu_table(ps2), tax_table(ps2))
+
+# write otu_table(ps2) into table for Venn diagram
+write.csv(otu_tax, "./Tables/OTU_Table_taxonomy.csv")
+
+
+# merge samples by Origin.
+ps.mer = merge_samples(ps2, "Origin")
+# transform the OTU table
+venn <- as.data.frame(t(otu_table(ps.mer)))
+# Replace a value in a dataframe with the row name
+venn[] <- replace(row.names(venn)[row(venn)*(NA^!venn)], !venn, 0)
+venn[venn == 0] <- NA
+venn <- venn[,c(1:3)]
+write.csv(venn, "./VennDiagram/Input_list_Cult.csv", row.names = F)
+
+
+# merge the cultivation samples
+met <- sam_data(ps.mer)
+met <- data.frame(met)
+met$Cult <- c("Cult", "Cult", "Cult", "Sea", "Sponges")
+met <- sample_data(met)
+sample_data(ps.mer) <- met
+ps.mer2 = merge_samples(ps.mer, "Cult")
+
+
+# transform the OTU table
+ven <- as.data.frame(t(otu_table(ps.mer2)))
+# Replace a value in a dataframe with the row name
+ven[] <- replace(row.names(ven)[row(ven)*(NA^!ven)], !ven, 0)
+ven[ven == 0] <- NA
+
+write.csv(ven, "./VennDiagram/Input_list_Sea-Sponge-Cult.csv",  row.names = F)
+``` 
+
+open the exported .csv files **Input_list_Cult.csv** and **Input_list_Sea-Sponge-Cult.csv** in excel, replace all NA with nothing. Sort the columns individually (each column on its own, watch out for header) by largest to smallest,  save as new file: 
+Venn_List_Cult.csv
+Venn_list_Sea-Sponge-Cult.csv
+
+Upload the columns  
+Create Venn diagram with this [tool](http://bioinfogp.cnb.csic.es/tools/venny/index.html)  
+Download figures as screenshots  
+recreate in powerpoint:  
+
+
+Venn-Diagram.pptx
+
+
+
+## Heatmap of Top 100 cultivated taxa
+
+Plotting the relative abundance of the top 100 cultivated OTUs to get an overview of taxa and sample composition.  
+
+with the [pheatmap](https://cran.r-project.org/web/packages/pheatmap/pheatmap.pdf) package 
+
+```{r pheatmap, tidy=TRUE, fig.height=13, fig.width=10}
+
+# subset the phyloseq object to only cultivation samples
+ps2.C <- subset_samples(ps2, Source!="Seawater") %>% subset_samples(Source!="Sponges")
+
+# remove OTUs that are not in these samples
+ps2.C1 <- prune_taxa(taxa_sums(ps2.C) > 0, ps2.C)
+
+# transform to relative abundance
+ps2.C1 <- microbiome::transform(ps2.C1, "compositional")
+
+# save the phyloseq object: relative abundance of cultivation only samples 
+saveRDS(ps2.C1, "./PhyloseqObjects/ps2.C1.RDS")   # compositional (relative abundance) of cultivation only samples
+
+# Take a subset of the  dataset, top 100 species
+topsp1 <- names(sort(taxa_sums(ps2.C1), TRUE)[1:100])
+ps2.C2 <- prune_taxa(topsp1, ps2.C1)
+
+# save the phyloseq object: top 100 species, relative abundance of cultivation only samples 
+saveRDS(ps2.C2, "./PhyloseqObjects/ps2.C2.RDS")   # Top 100 species, compositional (relative abundance) of cultivation only samples
+
+# how much of the data is represented in the top 100 cultivated OTUs?
+sort(sample_sums(ps2.C2)) # between 94 and 100%
+
+# extract the taxonomy table and save it 
+tax.table <- tax_table(ps2.C2)
+write.csv(tax.table, file = "./Tables/Top100taxaCultivation.csv")
+
+# manually edit the taxonomy table to keep lowest assigned rank only, and add variable to sort the Proteobacteria. 
+
+# read in manually edited taxonomy for top 100 cultivated OTUs
+taxo <- read.csv(file="./Tables/Top100taxaCultivation-Edited2.csv", header=TRUE, sep=",")
+
+
+#extract OTU table
+otu.table <- as.data.frame(abundances(ps2.C2))
+metahmp <- as.data.frame(meta(ps2.C2))
+
+# add rownames to the otutable matrix
+otu.table1 <- data.frame(otu.table)
+
+#try to fix the sample names
+colnames(otu.table1) <- metahmp$Samples
+
+otu.table1 <- cbind(otu.table1, taxo) 
+
+# we need to add OTUID id plus taxonomy OTUID_Taxonomy
+otu.table1$taxa <- paste(otu.table1$tax, otu.table1$X)
+
+#sort taxonomy by alphabet, first by tax, then by the Proteos column to put the Proteos together
+otu.table1 <- otu.table1[order(otu.table1$tax), ]
+otu.table1 <- otu.table1[order(otu.table1$Proteos), ]
+
+# make the matrix for the heatmap:
+
+otu.table2 <- as.matrix(otu.table1[,c(1:63)])
+rownames(otu.table2) <- otu.table1$taxa
+
+# gaps in columns of the heatmap
+gap <- c(12, 20, 43, 55, 59)
+
+# breaks for color
+mat_breaks1 <- seq(0.00001, 0.9, 0.01)
+
+# print the heatmap 
+pdf("./Figures/Heatmap/Figure_5_heatmap_relabundance_Top100.pdf", height = 14, width = 15)
+p <- pheatmap::pheatmap(otu.table2, color= colorRampPalette(c("dodgerblue", "orange","red","black")) (100), cluster_cols = FALSE, cluster_rows = FALSE, gaps_col = gap, border_color = "grey88", main="Top 100 OTUs", scale = "none",  breaks= mat_breaks1)
+dev.off()
+
+# refined using photoshop. final file: ./Figures/Heatmap/Figure_5_heatmap_relabundance_Top100 - edit-2 - flat.pdf
+
+pheatmap::pheatmap(otu.table2, color= colorRampPalette(c("dodgerblue", "orange","red","black")) (100), cluster_cols = FALSE, cluster_rows = FALSE, gaps_col = gap, border_color = "grey88", main="Top 100 OTUs", scale = "none",  breaks= mat_breaks1)
+
+``` 
+Figure  5: Heatmap showing the relative abundance of the top 100 cultivated OTUs, representing 94–100% of the total number of reads in individual samples. Color scale shows relative abundance (%)  within each sample. Rows of the heatmap are ordered by taxonomic classification, and OTUs were classified up to class (c), family (f) or genus (g) level. SampleIDs reflect cultivation media.
+
+
+
+
+# Impact of aeroplysinin, medium dilution and carbon sources   
+
+## Aeroplysinin effect
+
+To one set of media from the Plates experiment, the antibiotic aeroplysinin-1 was added to the inoculum before plating. 
+
+Comparing the results of plates with Aeroplysinin to the plates without.
+
+```{r aeroplysinin-impact-preprocessing}
+
+# subset to Plates only
+ps.plates <- subset_samples(ps2, Origin == "Plates")
+ps.plates <- subset_samples(ps.plates, ProjectName == "Poribacteria")
+
+#remove sample with mixed Aeroplysinin
+ps.plates <- subset_samples(ps.plates, Aeroplysinin != "mix")
+
+# prune taxa
+ps.plates <- prune_taxa(taxa_sums(ps.plates) > 0, ps.plates)
+
+```
+
+
+```{r aeroplysinin-analysis-relative_abundance, tidy=TRUE}
+
+# relative abundance transform dataset
+ps.platesrel <- microbiome::transform(ps.plates, "compositional")
+
+# ordinate with weighted UniFrac PCoA
+ordu.wt.uni1 = ordinate(ps.platesrel, "PCoA", "unifrac", weighted=TRUE)
+
+wt.unifrac1 <- plot_ordination(ps.platesrel, ordu.wt.uni1, shape= "Method", type = "samples") 
+wt.unifrac1$layers <- wt.unifrac1$layers[-1] # removes the "shape" layer from the ggplot object https://github.com/joey711/phyloseq/issues/250
+
+wt.unifrac1 <- wt.unifrac1 + scale_shape_manual(values=c(0,19)) + ggtitle("Weighted UniFrac PCoA") + theme_bw() + geom_point(size = 2.5) 
+
+# draw an ellipse at 0.95 confidence level  
+wt.unifrac1 <- wt.unifrac1 + mytheme + stat_ellipse(type = "norm", linetype=2)
+
+ggsave("./Figures/Beta_Diversity/Weighted UniFrac PCoA_Aeroplysinin_rel_ab.pdf", height = 6, width = 8)
+
+wt.unifrac1
+
+```
+
+Figure: Ordination of bacterial composition on samples with (black circles) and without (squares) addition of the antibiotic aeroplysinin-1. Ellipse corresponds to 95% confidence interval.
+
+
+Testing significance of Aeroplysinin impact on cultivated community
+
+```{r adonis-aeroplysinin}
+# adonis
+metadf <- data.frame(sample_data(ps.platesrel))
+wunifrac_ps.platesrel <- phyloseq::distance(physeq = ps.platesrel, method = "wunifrac")
+# Adonis test
+adonis(wunifrac_ps.platesrel ~ Method, data = metadf)
+
+# Permutational analysis of multivariate dispersions (PERMDISP) (Anderson, 2006) to test heterogeneity of community structure.
+
+beta <- betadisper(wunifrac_ps.platesrel, metadf$Method)
+permutest(beta)
+
+## Plot the groups and distances to centroids on the
+## first two PCoA axes
+plot(beta)
+
+## Tukey's Honest Significant Differences
+(beta.HSD <- TukeyHSD(beta))
+plot(beta.HSD)
+
+```
+
+
+## Relative abundance of OTUs on Plates with and without Aeroplysinin
+
+
+1. merge samples by aeroplysinin+ or aeroplysinin- with [merge_samples](https://joey711.github.io/phyloseq/merge.html)
+this sums up all the reads per sample.
+
+2. calculate relative abundance of OTUs in the merged samples
+
+```{r Aeroplysinin-rel-abundance-plot, tidy=TRUE}
+
+# merge samples
+mergedGP = merge_samples(ps.plates, "Method")
+
+# relative abundance of merged samples
+  ps.platescomp <- microbiome::transform(mergedGP, "compositional")
+
+# merge metadata
+SD = merge_samples(sample_data(ps.plates), "Method")
+
+# remove phy tree because doesnt work otherwise
+ps.platescomp@phy_tree <- NULL
+
+# melt to long format (for ggploting) 
+# prune out taxa below 3% in each sample
+
+ps.plates_genus <- ps.platescomp %>%
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.003) #%>%                         # Filter out low abundance taxa (<0.3%)
+  
+# sort by Abundance
+ps.plates_genus1 <- ps.plates_genus[order(ps.plates_genus$Abundance),]
+
+# merge Genus and OTU description
+ps.plates_genus2 <- ps.plates_genus1 
+ps.plates_genus2$Genus_OTU <-  paste(ps.plates_genus2$Genus,ps.plates_genus2$OTU)
+
+# manually edit some of the unidentified genus names
+write.csv(x = ps.plates_genus2, file = "./Tables/ps.plates_genus2.csv")
+
+# edit in excel, replace taxonomy descriptions, save as ps.plates_genus2-edited.csv
+ps.plates_genus3 <- read.csv(file = "./Tables/ps.plates_genus2-edited.csv", header=TRUE)
+
+
+# order for the plot
+r <- unique(ps.plates_genus3[order(ps.plates_genus3$Abundance),"legend"])
+
+# relative abundance plot
+plot.plates_genus3 <- ggplot(ps.plates_genus3, aes(x = Sample, y = Abundance, fill = factor(legend,levels = r))) +
+  geom_bar(stat = "identity") + theme_bw() + theme(axis.title.x = element_blank()) + theme(panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) +
+  ylab("Relative Abundance (OTUs > 0.3%)") + ggtitle("Relative abundance of dominant taxa") 
+
+colourCount = length(unique(ps.plates_genus3$legend)) #define number of variable colors based on number of Family (change the level accordingly to phylum/class/order)
+getPalette = colorRampPalette(brewer.pal(7, "Paired")) # change the palette as well as the number of colors will change according to palette.
+
+plot.plates_genus3 <- plot.plates_genus3 + scale_fill_manual(values = getPalette(colourCount)) + guides(fill=guide_legend(title="OTU (tax.level) Classification"))
+
+ggsave("./Figures/Beta_Diversity/8_relab_0.3_aeroply-gen-otu.pdf", plot.plates_genus3, height = 6, width = 8)
+
+plot.plates_genus3
+
+```
+Supplementary Figure: Effect of aeroplysinin-1 on the relative abundance of taxa. 
+
+
+Combine PCoA effect of aeroplysinin and relative abundance figures 
+```{r CCA-Effect-of-Aeroplysinin-and-relative-abundance-figure, tidy=TRUE, fig.width=12, fig.height=6}
+
+figure7 <- ggarrange(wt.unifrac1 + font("x.text", size = 10), 
+                    plot.plates_genus3,
+                    ncol = 2, nrow = 1, align = "h")
+
+ggsave("./Figures/Figure_6_pcoa_relab_aeroply.pdf", figure7, height=3.5, width=10)
+
+figure7 
+``` 
+
+Figure 6: A) PCoA analysis on weighted UniFrac distances illustrating the effect of aeroplysinin-1 (AP) on the cultivated community, and B) relative abundance of the most abundant taxa in all samples from incubation with (AP_positive) and without (AP_negative) aeroplysinin-1. 
+
+
+## The influence of medium dilution 
+
+on the microbial diversity on plates without aeroplysinin. For these samples, the variables medium dilution and carbon source could be  assigned unambiguously. 
+
+
+```{r without-Aeroplysinin}
+# subset samples to only Plates without aeroplysinin, and without ALL 4 2nd round
+ps.APn <- subset_samples(ps2.Cult1, Method == "AP_negative") 
+ps.APn <- subset_samples(ps.APn, Inoculum == "Aa16")  
+
+#prune taxa
+ps.APn <- prune_taxa(taxa_sums(ps.APn) > 0, ps.APn)
+
+# save the subsetted phyloseq object
+saveRDS(ps.APn, "./PhyloseqObjects/ps.APn.RDS")
+
+# set seed for reproducibility of the adonis test.
+set.seed(28975623)
+# adonis
+metadf.APn <- data.frame(sample_data(ps.APn))
+wunifrac_ps.APn <- phyloseq::distance(physeq = ps.APn, method = "wunifrac")
+
+# Adonis test on the influence of Medium Dilution
+adonis(wunifrac_ps.APn ~ Medium_Dilution, data = metadf.APn)
+
+# beta dispersion test
+beta.APn <- betadisper(wunifrac_ps.APn, metadf.APn$Medium_Dilution)
+permutest(beta.APn)
+
+# Adonis test on the influence of Carbon Source
+adonis(wunifrac_ps.APn ~ C_Source, data = metadf.APn)
+
+# beta dispersion test
+beta2.APn <- betadisper(wunifrac_ps.APn, metadf.APn$C_Source)
+permutest(beta2.APn)
+
+
+```
+The adonis test shows significant results for an impact of Medium Dilution on phylogenetic diversity. Betadisper results are not significant.
+
+
+```{r phylogenetic-diversity-impact-of-medium-dilution}
+
+# get the metadata (sample data) from phyloseq into seprate object as data.frame
+metadata_table_ps.APn  <- meta(ps.APn)
+
+# subset the dataframe to only the samples in the metadata table
+x1 <- df.pd[rownames(metadata_table_ps.APn), ]
+
+# add the PD values into the metadata
+metadata_table_ps.APn$Phylogenetic_diversity <- x1$PD 
+
+# change the order of the metadata table!
+metadata_table_ps.APn$Medium_Dilution <- factor(metadata_table_ps.APn$Medium_Dilution, levels = c("1x","10x", "50x"))
+
+# Visualize p values: Specify the comparisons you want (only 2 possible within the vectors)
+my_comparisons3 <- list( c("1x", "50x"))
+
+# plot phylogenetic diversity
+plot.pd.aa <- ggplot(metadata_table_ps.APn, aes(Medium_Dilution, Phylogenetic_diversity)) + geom_boxplot() +  geom_jitter(aes(color = C_Source), width=0.2, size = 2.5) + scale_colour_brewer(palette = "Paired") + theme(axis.text.x = element_text(size=14, angle = 90)) + theme_bw()  +  stat_compare_means(comparisons = my_comparisons3, label.y = c(3.5), label = "p.signif", hide.ns = FALSE) # Add pairwise comparisons p-value
+  
+plot.pd.aa <- plot.pd.aa + xlab("Medium Dilution") + ylab("Faith's Phylogenetic diversity") + theme(panel.grid.minor=element_blank(), panel.grid.major=element_blank())
+
+ggsave("./Figures/Alpha_Diversity/2_PD_Medium_Dilution.pdf", plot.pd.aa, height=6, width=8)
+
+print(plot.pd.aa)
+
+```
+Figure: Phylogenetic diversity of cultivated taxa on different medium dilutions.
+
+
+```{r export-table-of-PD-MediumDilution-Csource}
+
+# sort table from highest to lowest phylogenetic diversity.
+metadata_table_ps.APn2 <- metadata_table_ps.APn[order(metadata_table_ps.APn$Phylogenetic_diversity,decreasing = TRUE), ]
+
+# subset the metadata table to relevant variables
+table_ps.APn2 <- select(metadata_table_ps.APn2, Samples, C_Source, Medium_Dilution, Phylogenetic_diversity)
+
+
+write.csv(table_ps.APn2, "./Tables/PD_APn_Medium_Dilution_C_Source.csv")
+
+datatable(table_ps.APn2)
+
+``` 
+Table displaying carbon source, medium dilution and phylogenetic diversity of the "Plates" samples without aeroplysinin.
+
+
+## Canonical correspondence analysis on medium dilution
+
+CCA analysis testing the influence of medium dilution on the microbial diversity on plates without aeroplysinin.  
+
+From Wikipedia, the free encyclopedia
+*In applied statistics, canonical correspondence analysis (CCA) is a multivariate constrained ordination technique that extracts major gradients among combinations of explanatory variables in a dataset. The requirements of a CCA are that the samples are random and independent. Also, the data are categorical and that the independent variables are consistent within the sample site and error-free.*
+
+To assess the influence of medium dilution and carbon source, samples were subset to only plates without AP since for this part of the dataset the variables medium dilution and carbon source could be consistently assigned. 
+
+
+```{r CCA-ordination-on-samples-without-Aeroplysinin}
+# transform the dataset
+ps.APncom <- microbiome::transform(ps.APn, "compositional")
+
+# ordinate with two constraints: medium dilution and carbon source
+ps_ccpna2 <- ordinate(ps.APncom, "CCA", formula = ps.APncom ~ Medium_Dilution + C_Source)
+
+# test significance
+anova.cca(ps_ccpna2, by="terms")
+
+```
+
+Also in CCA analysis Medium dilution is a significant factor (p<0.001) while C_Source is not (p<0.160)
+
+
+```{r}
+# CCA WITH ENVIRONMENTAL ARROWS https://github.com/joey711/phyloseq/issues/274
+
+# count how many classes there are:
+tx <- as.data.frame(tax_table(ps.APncom))
+levels(tx$Class)# 7
+
+# Create ordination
+cca_litdir = ordinate(ps.APncom ~ Medium_Dilution, "CCA")
+# Mimic biplot from example
+p0 = plot_ordination(ps.APncom, cca_litdir, type = "biplot", color = "Class", shape = "Medium_Dilution")
+p0 <- p0 + scale_shape_manual(values=c(19,0,2,1)) + scale_color_manual(values = c("grey34",  "#1F78B4", "#FF7F00", "#33A02C", "#FFFF99", "#E31A1C",  "#6A3D9A", "#B15928")) + mytheme
+
+
+# Now add the environmental variables as arrows
+arrowmat = vegan::scores(cca_litdir, display = "cn")
+# Add labels, make a data.frame
+arrowdf <- data.frame(labels = rownames(arrowmat), arrowmat)
+# Define the arrow aesthetic mapping
+arrow_map = aes(xend = CCA1, yend = CCA2, x = 0, y = 0, shape = NULL, color = NULL, 
+    label = labels)
+label_map = aes(x = 1.2 * CCA1, y = 1.2 * CCA2, shape = NULL, color = NULL, 
+    label = labels)
+# Make a new graphic
+arrowhead = arrow(length = unit(0.05, "npc"), type="closed", angle=seq(10,80))
+p1 = p0 + geom_segment(arrow_map, size = 0.5, data = arrowdf, color = "black", 
+    arrow = arrowhead) + geom_text(label_map, size = 2, data = arrowdf) + ggtitle("B) CCA Medium Dilution")
+
+ggsave("./Figures/Figure_CCA_dilution_arrows.pdf", height=3.5, width=7)
+p1
+```
+Figure: Canonical correspondence analysis (CCA) ordination of Plates samples (large symbols) and indicative taxa (small symbols). Arrows indicate gradients of medium dilution influencing community composition.
+
+
+Test significance of the CCA analysis
+
+```{r CCA-significance}
+set.seed(342576)
+# test significance
+anova.cca(cca_litdir)
+anova.cca(cca_litdir, by="terms")
+```
+
+
+Combine phylogenetic diversity and CCA on media dilutions in one plot 
+
+```{r combine-medium-dilution-graphs}
+
+figurex <- ggarrange(plot.pd.aa + font("x.text", size = 9) + ggtitle("A) Phylogenetic Diversity") + coord_fixed(ratio=1), p1 + font("x.text", size = 10) + font("xlab", size=10) + coord_fixed(ratio=1) + ggtitle("B) CCA Medium Dilution"),
+                    ncol = 2, nrow = 1, align = "hv",
+                     legend = "right") 
+
+ggsave("./Figures/Figure_7_PD_CCA_dilution_arrows.pdf", height=3.5, width=10)
+figurex
+``` 
+
+Figure 7: A) Faith’s phylogenetic diversity of different medium dilutions and carbon sources. B) Canonical correspondence analysis (CCA) biplot of cultivated microbial communities on plates and indicative bacterial taxa. 
+
+
+# MiniColumns: Impact of Oxygen Concentration
+
+Winogradsky columns are enclosed, self-sustaining microbial ecosystems developing various chemical gradients. After 130 days of incubation, the oxygen gradient along the depth of the columns was measured. 
+
+```{r CCA_oxygen-concentration-on-MiniColumns, tidy=TRUE}
+
+# subset samples to only MiniColumns samples
+ps.minco <- subset_samples(ps1, Origin == "MiniColumns")
+ps.ht2 <- prune_taxa(taxa_sums(ps.minco) > 0, ps.minco)
+
+
+# transform the data to relative abundance
+ ps.ht2log <- microbiome::transform(ps.ht2, "compositional")
+
+tax <- as.data.frame(tax_table(ps.ht2log))
+levels(tax$Class) # 8
+
+# make CCA ordination on Location within the column
+ps_ccpna3 <- ordinate(ps.ht2log, "CCA", formula = ps.ht2log ~ Location)
+
+# plot the ordination
+tes3 <- plot_ordination(ps.ht2log, ps_ccpna3, color = "Class", shape = "Location", type="biplot") 
+
+tes3 <- tes3 + scale_shape_manual(values=c(19,0,1,2,5,6)) + scale_color_manual(values = c("grey34", "#1F78B4", "#FF7F00", "#33A02C", "#FFFF99", "#E31A1C",  "#6A3D9A", "#B15928", "#A6CEE3")) + mytheme
+
+
+ggsave("./Figures/Beta_Diversity/4_CCA_plot_MiniColumns.pdf", height = 6, width = 8)
+
+```
+
+test significance
+```{r test-significance-for-CCA}
+# for every permutation test i need to set seed for reproducibility of the anova
+set.seed(12631)
+anova.cca(ps_ccpna3)
+anova.cca(ps_ccpna3, by="terms")
+```
+
+p value for testing location on the enriched community is 0.346: not significant 
+
+```{r CCA-plot-on-Mini-Columns-add-arrows}
+# Now add the environmental variables as arrows to the CCA
+arrowmat = vegan::scores(ps_ccpna3, display = "cn")
+rownames(arrowmat) <- c("Sediment Bottom", "Sediment Top","Water Bottom","Water Surface","Water Top")
+ # "cn" gives the actual names of the variables
+ 
+
+# Add labels, make a data.frame
+ arrowdf <- data.frame(labels = rownames(arrowmat), arrowmat)
+# Define the arrow aesthetic mapping
+ arrow_map = aes(xend = CCA1, yend = CCA2, x = 0, y = 0, shape = NULL, color = NULL, 
+   label = labels)
+ label_map = aes(x = 1.2 * CCA1, y = 1.2 * CCA2, shape = NULL, color = NULL, 
+    label = labels)
+ 
+# Make a new graph, and turn the graph 90deg clockwise, so location Top is on top 
+ arrowhead = arrow(length = unit(0.05, "npc"), type="closed", angle=seq(10,80))
+
+ plot.col <- tes3 + coord_fixed(xlim=1, ylim=8) + scale_x_reverse() + coord_flip() + geom_jitter()  + ggtitle("C) CCA - Location in MiniColumn") + geom_segment(arrow_map, size = 0.5, data = arrowdf, color = "black", 
+    arrow = arrowhead) + geom_text(label_map, size = 3.2, data = arrowdf)
+ 
+ggsave("./Figures/Beta_Diversity/5_CCA_plot_arrows_MiniColumns.pdf", plot.col, height = 7, width = 7)
+plot.col
+
+```
+Figure: canonical correspondence analysis (CCA) ordination on MiniColumn microbial sample composition (large symbols) and indicative taxa (small symbols). Arrows indicate the gradients caused by the sample's location inside the columns.
+REMARK: this CCA plot is turned 90 degrees to better reflect the depth of the columns. CCA2 is X axis, CCA1 is on the Y axis.
+
+
+## Oxygen concentrations in MiniColumns
+plot the oxygen concentrations within the different columns
+
+```{r plot-for-O2-concentration-in-MiniColumns, tidy=TRUE}
+
+# read in the table with calculated O2 and stdev
+metadata_table_ps.ht2_O2calc <- read.csv(file="./Data/Map_file_Aplysina_cultivation.txt", header=TRUE, sep="\t")
+
+# convert column values to numeric or factor for plot
+metadata_table_ps.ht2_O2calc$O2_calc <- as.numeric(as.character(metadata_table_ps.ht2_O2calc$O2_calc))
+metadata_table_ps.ht2_O2calc$O2_calc_stdev <- as.numeric(as.character(metadata_table_ps.ht2_O2calc$O2_calc_stdev))
+metadata_table_ps.ht2_O2calc$Column <- as.factor(as.character(metadata_table_ps.ht2_O2calc$Column))
+
+# subset dataframe to only MiniColumns
+metadata_table_ps.ht2_O2calc <- subset(metadata_table_ps.ht2_O2calc, Origin=="MiniColumns") 
+
+# plot oxgen concentrations
+plot.o2calc2 <- ggplot(data = metadata_table_ps.ht2_O2calc, aes(x=Location, y=O2_calc, color = Column)) +
+    geom_point(size = 2, position=position_dodge(width=0.2)) +
+    geom_errorbar(
+        aes(ymin = O2_calc-O2_calc_stdev, ymax = O2_calc+O2_calc_stdev),
+        width = 0.3,
+        position=position_dodge(width=0.2)) +
+    geom_hline(aes(yintercept = 0), linetype = "dashed") + mytheme + scale_x_discrete(limits=c("Sediment_Bottom", "Sediment_Top", "Water_Bottom", "Water_Top", "Water_Surface"), labels=c("Sediment Bottom", "Sediment Top", "Water Bottom", "Water Top", "Water Surface")) +  geom_line(aes(group = Column, colour=Column), size = 1.5, position=position_dodge(width=0.2)) +  scale_color_manual(values=c("black",	"#696969", "red", "orange")) + coord_flip() 
+
+plot.o2calc2 <- plot.o2calc2 + xlab("Location in MiniColumn") + ylab("Oxygen concentration [% air saturation]") + ggtitle("A) Dissolved Oxygen concentration") 
+
+ggsave("./Figures/Figure_8_O2calc_conc_MiniColumns.pdf", plot.o2calc2, height = 5, width = 6)
+
+plot.o2calc2 
+```
+Figure: Means and standard deviations of measured Oxygen concentration along the depth of the 4 replicate MiniColumns. 
+
+### regression analysis
+
+of oxygen concentrations on phylogenetic diversity in the MiniColumns
+
+```{r regression-analysis}
+# use the phyloseq object subsetted to minicolumn samples only
+otu.ht2 <- as.data.frame(ps.ht2@otu_table)
+
+ht2.tree <- phy_tree(ps.ht2)
+
+ht2.pd <- pd(t(otu.ht2), ht2.tree,include.root=F) # t(ou_table) transposes the table for use in picante and the tre file comes from the first code chunck we used to read tree file (see making a phyloseq object section).
+
+sample_data(ps.ht2)$Phylogenetic_Diversity <- ht2.pd$PD
+ht2.meta <- meta(ps.ht2)
+
+# convert column values to numeric for plot
+ht2.meta$O2_calc<- as.numeric(as.character(ht2.meta$O2_calc))
+
+# fit the linear model
+mod1 <- lm(O2_calc ~ Phylogenetic_Diversity, data = ht2.meta)
+summary(mod1)
+
+``` 
+
+```{r plot-linear-model-oxygen}
+
+# plot linear model on oxygen concentration and phylogenetic diversity
+plot(mod1)
+plot.mod <- ggplot(ht2.meta, aes(x=O2_calc, y=Phylogenetic_Diversity)) + stat_smooth(method = lm) +
+    geom_point(aes(shape = Location, fill = Column, colour = Column), size=3)  + annotate("text", x=30, y= 2, label = "italic(R) ^ 2 == 0.06948", parse=TRUE) + annotate("text", x=30, y= 2.1, label = "p = 0.137")  + xlab("Oxygen concentration [% air saturation]")  + ylab("Faith's Phylogenetic Diversity") + scale_shape_manual(values=c(22, 21, 24, 23, 25)) +  scale_color_manual(values=c("black",	"#696969", "red", "orange")) +  scale_fill_manual(values=c("black",	"#696969", "red", "orange"))
+
+plot.mod <- plot.mod + mytheme 
+
+ggsave("./Figures/O2_MiniColumns/2_O2_regression_MiniColumns.pdf", plot.mod, height = 5, width = 6)
+plot.mod 
+```
+
+Figure: Linear model depicting relationship between oxygen concentration and phylogenetic diversity of MiniColumn samples. 
+
+
+```{r}
+# distribution of values of PD and O2
+par(mfrow=c(1,2))
+O2 <- plot(density(ht2.meta$O2_calc))
+Pd <- plot(density(ht2.meta$Phylogenetic_Diversity))
+
+max(ht2.meta$Phylogenetic_Diversity)
+min(ht2.meta$Phylogenetic_Diversity)
+
+## phylogenetic diversity is increased with higher oxygen concentrations. 
+
+```
+
+Extra Figures: Density plots showing the distribution of 1) oxygen concentrations: the majority of samples has an oxygen concentration of between 0 and 40%. 2) Phylogenetic diversity: the majority of samples has a phylogenetic diviersity of around 3.
+
+
+put all plots on MiniColumns into one graph: [like here](http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/81-ggplot2-easy-way-to-mix-multiple-graphs-on-the-same-page)
+
+```{r all-minicolumns-in-one-plot, echo=FALSE,out.width='.49\\linewidth', fig.width=10, fig.height=7}
+
+figure2 <- ggarrange(plot.o2calc2 + rremove("ylab")+ font("x.text", size = 10) + rremove("xlab") + theme(legend.position="none") + ggtitle("A) Dissolved oxygen concentration"), 
+                    plot.mod + font("x.text", size = 10) + font("xlab", size=10) + ggtitle("B) Linear model") + theme(legend.position="none"),
+                    ncol = 1, nrow = 2, align = "v")
+figure2 
+
+figure3 <- ggarrange(figure2, plot.col)
+
+ggsave("./Figures/Figure_8_O2calc_conc_regression_MiniColumns.pdf", figure3, height = 7, width = 10)
+figure3 
+```
+
+Figure 8: A) Dissolved oxygen concentration along the depth of four replicate MiniColumns. B) Regression analysis of phylogenetic diversity and oxygen concentration. Grey area marks 95% confidence region. C) CCA triplot of enriched microbial communities (large symbols) in relation to indicative bacterial taxa (labelled at Class level) and location in the MiniColumns (arrows). 
+
+
+
+# Some additional graphs
+
+Composition plot of cultivation samples
+```{r Composition-plot-cultivation-only-samples, tidy=TRUE, warning=FALSE}
+
+ps1.com <- ps2.Cult1 # create a new pseq object with all the cultivation samples
+
+#transform data to relative abundance
+ps1.com <- microbiome::transform(ps1.com, "compositional")
+
+# We need to set Palette
+tax <- as.data.frame(ps1.com@tax_table)  # this will help in setting large color options
+
+colourCount = length(unique(tax$Class))  #define number of variable colors based on number of Family (change the level accordingly to phylum/class/order)
+getPalette = colorRampPalette(brewer.pal(12, "Paired"))  # change the palette as well as the number of colors will change according to palette.
+
+otu.df <- as.data.frame(otu_table(ps1.com))  # make a dataframe for OTU information.
+# head(otu.df) # check the rows and columns
+
+tax$OTU <- row.names.data.frame(otu.df)  # Add the OTU ids from OTU table into the taxa table at the end.
+colnames(tax)  # You can see that we now have extra taxonomy levels.
+
+taxmat <- as.matrix(tax)  # convert it into a matrix.
+new.tax <- tax_table(taxmat)  # convert into phyloseq compatible file.
+tax_table(ps1.com) <- new.tax  # incorporate into phyloseq Object
+
+# first remove the phy_tree
+ps1.com@phy_tree <- NULL
+
+# merge at class level
+ps1.com.fam <- aggregate_taxa(ps1.com, "Class")
+
+# plot composition
+plot.composition.COuntAbun <- plot_composition(ps1.com.fam) + theme(legend.position = "bottom") + 
+    scale_fill_manual(values = getPalette(colourCount)) + scale_x_discrete(labels = (sample_data(ps1.com)$Samples))+ theme_bw() + 
+    theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("Relative abundance") + labs(x = "Samples", y = "Relative abundance",
+                                   title = "Class level relative abundances of cultivation samples") + guides(fill=guide_legend(title="Class"))
+         
+plot.composition.COuntAbun
+
+ggsave("./Supplementary/1_Class_RelAbundance_cultivation.pdf", height = 6, width = 10)
+
+``` 
+
+Figure: relative microbial abundance of samples from cultivation experiments, shown at Class level.  
+
+Composition plot of sponge and seawater samples
+```{r rel-abundance-sponges-seawater-samples, tidy=TRUE}
+
+# subset to only sponge and seawater
+ps.comp <- subset_samples(ps2.x, Source != "Liquid_Culture") %>% subset_samples(Source != "Biofilm") %>% subset_samples(Source != "picked_colonies(+)") %>% subset_samples(Source != "Sediment") %>% subset_samples(Source != "Water") %>% subset_samples(Source != "picked_colonies(-)") 
+
+ps1.com1 <- ps.comp # create a new pseq object with all the cultivation samples
+
+#transform data to relative abundance
+ps1.com1 <- microbiome::transform(ps1.com1, "compositional") 
+
+# We need to set Palette
+tax <- as.data.frame(ps1.com1@tax_table)  # this will help in setting large color options
+
+otu.df <- as.data.frame(otu_table(ps1.com1))  # make a dataframe for OTU information.
+# head(otu.df) # check the rows and columns
+
+tax$OTU <- row.names.data.frame(otu.df)  # Add the OTU ids from OTU table into the taxa table at the end.
+colnames(tax)  # You can see that we now have extra taxonomy levels.
+
+taxmat <- as.matrix(tax)  # convert it into a matrix.
+new.tax <- tax_table(taxmat)  # convert into phyloseq compatible file.
+tax_table(ps1.com1) <- new.tax  # incorporate into phyloseq Object
+
+# first remove the phy_tree
+ps1.com1@phy_tree <- NULL
+
+# merge at class level
+ps1.com.ph <- aggregate_taxa(ps1.com1, "Phylum", top = 10)
+
+# prepare a factor list for the legend entries
+x <- as.data.frame(tax_table(ps1.com.ph))
+x1 <- x$Phylum
+
+# plot composition
+plot.composition.COuntAbun2 <- plot_composition(ps1.com.ph, x.label = "Origin") + 
+    scale_fill_brewer(palette = "Paired", labels= x1) + theme_bw() + 
+    theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("Relative abundance") + labs(x = NULL, y = "Relative abundance",
+                                   title = "Relative abundances of top 10 phyla in seawater and sponge samples") + guides(fill=guide_legend(title="Phylum")) 
+
+# labels of the facets
+labels <- c(Seawater = "Seawater", Sponges = "Aplysina aerophoba")
+
+plot.composition.COuntAbun2 + facet_grid(~xlabel, labeller=labeller(xlabel = labels), scales = "free_x", space = "free") + theme(axis.text.x = element_blank(), axis.ticks = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(strip.background = element_rect(fill="white"))
+
+ggsave("./Supplementary/2_Phylum_RelAbundance_SW_Sponges.pdf", height = 6, width = 8)
+
+```
+
+Figure: relative microbial abundance on Phylum level of seawater and sponge samples.  
+
+Composition plot of PMA samples
+
+```{r Composition-plot-PMA-samples}
+
+ps1.com.PMA <- ps2.PMA # create a new pseq object
+ps1.com.PMA <- microbiome::transform(ps1.com.PMA, "compositional")
+
+# remove OTUs that are not in these samples
+ps1.com.PMA <- prune_taxa(taxa_sums(ps1.com.PMA) > 0, ps1.com.PMA)
+
+# We need to set Palette
+tax <- as.data.frame(ps1.com.PMA@tax_table)  # this will help in setting large color options
+
+colourCount = length(unique(tax$Class))  #define number of variable colors based on number of Family (change the level accordingly to phylum/class/order)
+getPalette = colorRampPalette(brewer.pal(12, "Paired"))  # change the palette as well as the number of colors will change according to palette.
+
+otu.df <- as.data.frame(otu_table(ps1.com.PMA))  # make a dataframe for OTU information.
+# head(otu.df) # check the rows and columns
+
+tax$OTU <- row.names.data.frame(otu.df)  # Add the OTU ids from OTU table into the taxa table at the end.
+colnames(tax)  # You can see that we now have extra taxonomy levels.
+
+taxmat <- as.matrix(tax)  # convert it into a matrix.
+new.tax <- tax_table(taxmat)  # convert into phyloseq compaitble file.
+tax_table(ps1.com.PMA) <- new.tax  # incroporate into phyloseq Object
+
+# first remove the phy_tree
+
+ps1.com.PMA@phy_tree <- NULL
+
+# Second merge at class level
+
+ps1.com.fam <- aggregate_taxa(ps1.com.PMA, "Class")
+
+plot.com.PMA <- plot_composition(ps1.com.fam) + theme(legend.position = "bottom") + 
+    scale_fill_manual(values = getPalette(colourCount)) + theme_bw() + 
+    theme(axis.text.x = element_text(angle = 90)) + 
+  ggtitle("Relative abundance") + labs(x = "       PMA       Cryostocks", y = "Relative abundance",
+                                   title = "PMA Relative abundance") + guides(fill=guide_legend(title="Class")) 
+plot.com.PMA
+
+ggsave("./Supplementary/5_Class_barplot_RelAbundance_PMA.pdf", height = 6, width = 8)
+
+```
+Figure: Relative abundance of microbial taxa on Class level of PMA-treated samples (left) and Cryopreserved samples (right).  
+
+
+Make CCA of all cultivation samples and test significance of cultivation method 
+
+```{r cca-cultivation-origin}
+
+# log transform the dataset
+ps2.Cultlog <- microbiome::transform(ps2.Cult, "log")
+
+ps2.Cult_cca <- ordinate(ps2.Cultlog, "CCA", formula = ps2.Cultlog ~ Origin + Medium + Method)
+
+# test significance of the CCA analysis
+set.seed(3422346)
+# test significance
+anova.cca(ps2.Cult_cca)
+
+anova.cca(ps2.Cult_cca, by="terms")
+
+cult_cca <- plot_ordination(ps2.Cultlog, ps2.Cult_cca, color = "Phylum", shape = "Origin", type="split") 
+
+cult_cca <- cult_cca + mytheme + scale_color_manual(values = brewer.pal(n = 9, name = "Set1"))
+cult_cca
+
+```
+
+Figure: Canonical correspondence analysis (CCA) plot ordinating the community composition of cultivation samples (left) and the respective indicative taxa (right). Samples cluster according to Origin (Cultivation Method). 
+
+# R packages and their versions used for this analysis.
+
+```{r}
+
+sessionInfo()
+
+
+``` 
