@@ -4,7 +4,7 @@ Study Title: Cultivation of bacteria from Aplysina aerophoba: effects of oxygen 
 ----------------------------------------------------------------------------------
 Authors: Johanna Gutleben 1, Catarina Loureiro 1, Laura Adriana Ramírez Romero 1, Sudarshan Shetty 1, René H. Wijffels 2,3, Hauke Smidt 1, Detmer Sipkema 1
 
-Correspondence: Johanna Gutleben
+Correspondence: Johanna Gutleben  
 For code related queries: johanna.gutleben[a]gmx.at
 
 
