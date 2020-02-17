@@ -5,7 +5,7 @@ Study Title: Cultivation of Bacteria from Aplysina aerophoba: Effects of Oxygen 
 Authors: Johanna Gutleben<sup>1</sup>, Catarina Loureiro<sup>1</sup>, Laura Adriana Ramírez Romero<sup>1</sup>, Sudarshan Shetty<sup>1</sup>, René H. Wijffels<sup>2,3</sup>, Hauke Smidt<sup>1</sup>, Detmer Sipkema<sup>1</sup>  
 
 Correspondence: Dr. Johanna Gutleben and/or Dr. Detmer Sipkema  
-For queries: johanna.gutleben[a]gmx.at and/or detmer.sipkema@wur.nl  
+For queries: johanna.gutleben[@]gmx.at and/or detmer.sipkema[@]wur.nl  
 
 This repository contains the codes and files necessary for the analyses of results from cultivation experiments on bacteria derived from the sponge A. aerophoba.   
 Sipkema, Detmer, Johanna Gutleben, Catarina Loureiro, Laura Ramirez, Sudarshan Anand Shetty, Rene H. Wijffels, and Hauke Smidt. "Cultivation of Bacteria from Aplysina aerophoba: Effects of Oxygen and Nutrient Gradients." Frontiers in Microbiology 11 (2020): 175. [link to article](https://www.frontiersin.org/articles/10.3389/fmicb.2020.00175/abstract)  
